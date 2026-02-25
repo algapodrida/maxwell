@@ -2,14 +2,24 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Cat Platformer 3D</title>
+    <title>Super Cat Tuna Quest 3D</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        #ui { position: absolute; top: 20px; left: 20px; color: white; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; pointer-events: none; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #gui {
+            position: absolute; top: 20px; left: 20px; color: white;
+            background: rgba(0,0,0,0.7); padding: 20px; border-radius: 15px;
+            border: 2px solid #ffcc00; pointer-events: none;
+        }
+        .stat { font-size: 1.5rem; font-weight: bold; color: #ffcc00; }
+        #msg { position: absolute; top: 50%; width: 100%; text-align: center; color: white; font-size: 2rem; display: none; }
     </style>
 </head>
 <body>
-    <div id="ui">Mover: FLECHAS / AD | Saltar: ESPACIO</div>
+    <div id="gui">
+        <div class="stat">Atún: <span id="score">0</span></div>
+        <div style="font-size: 0.9rem; margin-top: 5px;">Saltar: ESPACIO | Mover: A - D</div>
+    </div>
+    <div id="msg">¡POWER UP! ⚡</div>
 
     <script type="importmap">
         {
@@ -24,10 +34,10 @@
         import * as THREE from 'three';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
-        // --- CONFIGURACIÓN DE ESCENA ---
+        // --- MOTOR DE JUEGO ---
         const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x87ceeb); // Cielo azul
-        scene.fog = new THREE.Fog(0x87ceeb, 10, 50);
+        scene.background = new THREE.Color(0x1a1a2e);
+        scene.fog = new THREE.Fog(0x1a1a2e, 5, 45);
 
         const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
         const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -36,92 +46,142 @@
         document.body.appendChild(renderer.domElement);
 
         // --- LUCES ---
-        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1);
-        scene.add(hemiLight);
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        dirLight.position.set(5, 10, 5);
-        dirLight.castShadow = true;
-        scene.add(dirLight);
+        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambient);
+        const sun = new THREE.DirectionalLight(0xffffff, 2);
+        sun.position.set(5, 10, 7);
+        sun.castShadow = true;
+        scene.add(sun);
 
-        // --- VARIABLES DE JUEGO ---
+        // --- ESTADO DEL JUEGO ---
         let cat = null;
-        const keys = { left: false, right: false, jump: false };
-        const player = {
-            velocityV: 0, // Vertical
-            velocityH: 0, // Horizontal
-            isGrounded: false,
-            speed: 0.15,
-            jumpForce: 0.2,
-            gravity: 0.009
-        };
+        let score = 0;
+        let isPowerUp = false;
+        const items = [];
+        const obstacles = [];
+        const keys = { a: false, d: false, space: false };
+        const player = { velY: 0, speed: 0.15, isGrounded: false };
 
-        // --- SUELO (PLATAFORMA LARGA) ---
-        const floorGeo = new THREE.BoxGeometry(100, 1, 4);
-        const floorMat = new THREE.MeshStandardMaterial({ color: 0x33aa33 });
+        // --- CREACIÓN DEL MUNDO ---
+        const floorGeo = new THREE.BoxGeometry(200, 1, 6);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x222244 });
         const floor = new THREE.Mesh(floorGeo, floorMat);
         floor.position.y = -0.5;
         floor.receiveShadow = true;
         scene.add(floor);
 
+        // Generar latas y obstáculos
+        function createWorld() {
+            const tunaGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.2, 16);
+            const tunaMat = new THREE.MeshStandardMaterial({ color: 0xffcc00, metalness: 0.8, roughness: 0.2 });
+            const obsGeo = new THREE.BoxGeometry(1, 2, 1);
+            const obsMat = new THREE.MeshStandardMaterial({ color: 0xff4444 });
+
+            for (let i = 1; i < 20; i++) {
+                // Latas de atún
+                const tuna = new THREE.Mesh(tunaGeo, tunaMat);
+                tuna.position.set(i * 5 + Math.random() * 2, 1, 0);
+                tuna.rotation.x = Math.PI / 2;
+                scene.add(tuna);
+                items.push(tuna);
+
+                // Obstáculos
+                if (i % 3 === 0) {
+                    const obs = new THREE.Mesh(obsGeo, obsMat);
+                    obs.position.set(i * 5 + 3, 1, 0);
+                    scene.add(obs);
+                    obstacles.push(obs);
+                }
+            }
+        }
+        createWorld();
+
         // --- CARGAR GATO ---
         const loader = new GLTFLoader();
+        // Asegúrate de que el archivo se llame gato.glb
         loader.load('./gato.glb', (gltf) => {
             cat = gltf.scene;
-            cat.traverse(child => { if (child.isMesh) child.castShadow = true; });
-            cat.scale.set(0.5, 0.5, 0.5); // Ajusta según tu modelo
+            cat.scale.set(0.6, 0.6, 0.6);
+            cat.traverse(n => { if (n.isMesh) n.castShadow = true; });
             scene.add(cat);
         });
 
         // --- CONTROLES ---
-        window.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowRight' || e.code === 'KeyD') keys.right = true;
-            if (e.key === 'ArrowLeft' || e.code === 'KeyA') keys.left = true;
-            if (e.code === 'Space') keys.jump = true;
-        });
-        window.addEventListener('keyup', (e) => {
-            if (e.key === 'ArrowRight' || e.code === 'KeyD') keys.right = false;
-            if (e.key === 'ArrowLeft' || e.code === 'KeyA') keys.left = false;
-            if (e.code === 'Space') keys.jump = false;
-        });
+        window.onkeydown = (e) => { 
+            if(e.code === 'KeyA') keys.a = true; 
+            if(e.code === 'KeyD') keys.d = true; 
+            if(e.code === 'Space') keys.space = true; 
+        };
+        window.onkeyup = (e) => { 
+            if(e.code === 'KeyA') keys.a = false; 
+            if(e.code === 'KeyD') keys.d = false; 
+            if(e.code === 'Space') keys.space = false; 
+        };
 
-        // --- LÓGICA ---
+        // --- LÓGICA PRINCIPAL ---
         function update() {
             if (!cat) return;
 
-            // Movimiento Horizontal
-            if (keys.right) player.velocityH = player.speed;
-            else if (keys.left) player.velocityH = -player.speed;
-            else player.velocityH *= 0.9; // Fricción
-
-            cat.position.x += player.velocityH;
-
-            // Rotación: El gato gira mientras se mueve
-            if (Math.abs(player.velocityH) > 0.01) {
-                cat.rotation.z -= player.velocityH * 2; // Giro lateral
-                cat.rotation.y = player.velocityH > 0 ? Math.PI / 2 : -Math.PI / 2; // Mirar dirección
+            // Movimiento lateral
+            let currentSpeed = isPowerUp ? player.speed * 2 : player.speed;
+            if (keys.d) {
+                cat.position.x += currentSpeed;
+                cat.rotation.z -= 0.2; // Gira al correr
+                cat.rotation.y = Math.PI/2;
+            }
+            if (keys.a) {
+                cat.position.x -= currentSpeed;
+                cat.rotation.z += 0.2;
+                cat.rotation.y = -Math.PI/2;
             }
 
             // Salto y Gravedad
-            if (keys.jump && player.isGrounded) {
-                player.velocityV = player.jumpForce;
+            if (keys.space && player.isGrounded) {
+                player.velY = 0.25;
                 player.isGrounded = false;
             }
+            player.velY -= 0.01;
+            cat.position.y += player.velY;
 
-            player.velocityV -= player.gravity;
-            cat.position.y += player.velocityV;
-
-            // Colisión básica con suelo (y = 0)
-            if (cat.position.y <= 0.5) {
+            if (cat.position.y < 0.5) {
                 cat.position.y = 0.5;
-                player.velocityV = 0;
+                player.velY = 0;
                 player.isGrounded = true;
             }
 
-            // Cámara sigue al gato (Scroll Lateral)
-            camera.position.x = cat.position.x;
-            camera.position.y = cat.position.y + 2;
-            camera.position.z = 8;
-            camera.lookAt(cat.position.x, cat.position.y, 0);
+            // Colisiones con Atún
+            items.forEach((item, index) => {
+                item.rotation.z += 0.05; // Girar lata
+                if (cat.position.distanceTo(item.position) < 0.8) {
+                    scene.remove(item);
+                    items.splice(index, 1);
+                    score += 1;
+                    document.getElementById('score').innerText = score;
+                    activatePowerUp();
+                }
+            });
+
+            // Colisiones con Obstáculos
+            obstacles.forEach(obs => {
+                if (cat.position.distanceTo(obs.position) < 0.8) {
+                    cat.position.x -= 0.5; // Empuje hacia atrás
+                    score = Math.max(0, score - 1);
+                    document.getElementById('score').innerText = score;
+                }
+            });
+
+            // Cámara dinámica
+            camera.position.lerp(new THREE.Vector3(cat.position.x, cat.position.y + 3, 10), 0.1);
+            camera.lookAt(cat.position.x, cat.position.y + 1, 0);
+        }
+
+        function activatePowerUp() {
+            isPowerUp = true;
+            document.getElementById('msg').style.display = 'block';
+            setTimeout(() => {
+                isPowerUp = false;
+                document.getElementById('msg').style.display = 'none';
+            }, 3000);
         }
 
         function animate() {
